@@ -89,6 +89,7 @@ class Coach:
 
     def load_from_train_checkpoint(self, ckpt):
         print('Loading previous training data...')
+        print(ckpt.keys())
         self.global_step = ckpt['global_step'] + 1
         self.best_val_loss = ckpt['best_val_loss']
         self.net.load_state_dict(ckpt['state_dict'])
@@ -101,6 +102,8 @@ class Coach:
         if self.opts.progressive_steps:
             self.check_for_progressive_training_update(is_resume_from_ckpt=True)
         print(f'Resuming training from step {self.global_step}')
+        self.opts.save_interval = 10000
+        self.opts.max_steps=300000
 
     def train(self):
         self.net.train()
