@@ -16,10 +16,11 @@ class InferenceDataset(Dataset):
 
 	def __getitem__(self, index):
 		from_path = self.paths[index]
+		print(from_path)        
 		if self.preprocess is not None:
 			from_im = self.preprocess(from_path)
 		else:
 			from_im = Image.open(from_path).convert('RGB')
 		if self.transform:
 			from_im = self.transform(from_im)
-		return from_im
+		return from_im, from_path

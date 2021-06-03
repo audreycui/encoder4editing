@@ -1,4 +1,5 @@
 import argparse
+from argparse import Namespace
 
 import torch
 import numpy as np
@@ -16,13 +17,23 @@ from utils.model_utils import setup_model
 from utils.common import tensor2im
 from utils.alignment import align_face
 from PIL import Image
-
+from models.psp import pSp
 
 def main(args):
-    net, opts = setup_model(args.ckpt, device)
+    #net, opts = setup_model(args.ckpt, device)
+    ckpt = torch.load(args.ckpt, map_location='cpu')
+    opts = ckpt['opts']
+    opts['checkpoint_path'] = args.ckpt
+    opts= Namespace(**opts)
+    net = pSp(opts)
+    net.eval()
+    net.cuda()
+    
     is_cars = 'car' in opts.dataset_type
     generator = net.decoder
     generator.eval()
+    generator.cuda()
+    print("model loaded!")
     args, data_loader = setup_data_loader(args, opts)
 
     # Check if latents exist
@@ -30,11 +41,11 @@ def main(args):
     if os.path.exists(latents_file_path):
         latent_codes = torch.load(latents_file_path).to(device)
     else:
-        latent_codes = get_all_latents(net, data_loader, args.n_sample, is_cars=is_cars)
+        latent_codes, paths = get_all_latents(net, data_loader, args.n_sample, is_cars=is_cars)
         torch.save(latent_codes, latents_file_path)
 
     if not args.latents_only:
-        generate_inversions(args, generator, latent_codes, is_cars=is_cars)
+        generate_inversions(args, generator, latent_codes, paths, is_cars=is_cars, )
 
 
 def setup_data_loader(args, opts):
@@ -78,8 +89,9 @@ def get_latents(net, x, is_cars=False):
 def get_all_latents(net, data_loader, n_images=None, is_cars=False):
     all_latents = []
     i = 0
+    paths = []
     with torch.no_grad():
-        for batch in data_loader:
+        for batch, loc in data_loader:
             if n_images is not None and i > n_images:
                 break
             x = batch
@@ -87,17 +99,26 @@ def get_all_latents(net, data_loader, n_images=None, is_cars=False):
             latents = get_latents(net, inputs, is_cars)
             all_latents.append(latents)
             i += len(latents)
-    return torch.cat(all_latents)
+            paths.append(loc)
+    return torch.cat(all_latents), paths
 
 
-def save_image(img, save_dir, idx):
+def save_image(img, latent, save_dir, idx, name):
+    print(name)
+    name = name[0] 
+    #name = name.replace('/', '_')
     result = tensor2im(img)
-    im_save_path = os.path.join(save_dir, f"{idx:05d}.jpg")
-    Image.fromarray(np.array(result)).save(im_save_path)
+    im_save_path = os.path.join(save_dir, name+'_inverted')
+    try: 
+        Image.fromarray(np.array(result)).save(im_save_path)
+    except: 
+        os.mkdir(im_save_path[:im_save_path.rfind('/')])
+        Image.fromarray(np.array(result)).save(im_save_path)
+    
+    torch.save(latent,os.path.join(save_dir, name+'_z')
 
-
-@torch.no_grad()
-def generate_inversions(args, g, latent_codes, is_cars):
+@torch.no_grad() 
+def generate_inversions(args, g, latent_codes, paths, is_cars):
     print('Saving inversion images')
     inversions_directory_path = os.path.join(args.save_dir, 'inversions')
     os.makedirs(inversions_directory_path, exist_ok=True)
@@ -105,7 +126,7 @@ def generate_inversions(args, g, latent_codes, is_cars):
         imgs, _ = g([latent_codes[i].unsqueeze(0)], input_is_latent=True, randomize_noise=False, return_latents=True)
         if is_cars:
             imgs = imgs[:, :, 64:448, :]
-        save_image(imgs[0], inversions_directory_path, i + 1)
+        save_image(imgs[0], latent_codes[i], inversions_directory_path, i + 1, paths[i])
 
 
 def run_alignment(image_path):
